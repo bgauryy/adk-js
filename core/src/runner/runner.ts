@@ -8,6 +8,8 @@ import {Content, createPartFromText} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
+import {runCompactionForSlidingWindow} from '../agents/compaction.js';
+import {EventsCompactionConfig} from '../agents/events_compaction_config.js';
 import {
   InvocationContext,
   newInvocationContextId,
@@ -52,6 +54,7 @@ export interface RunnerConfig {
   sessionService: BaseSessionService;
   memoryService?: BaseMemoryService;
   credentialService?: BaseCredentialService;
+  eventsCompactionConfig?: EventsCompactionConfig;
 }
 
 export class Runner {
@@ -62,6 +65,7 @@ export class Runner {
   readonly sessionService: BaseSessionService;
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
 
   constructor(input: RunnerConfig) {
     this.appName = input.appName;
@@ -71,6 +75,7 @@ export class Runner {
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
     this.credentialService = input.credentialService;
+    this.eventsCompactionConfig = input.eventsCompactionConfig;
   }
 
   /**
@@ -185,6 +190,7 @@ export class Runner {
             userContent: newMessage,
             runConfig,
             pluginManager: this.pluginManager,
+            eventsCompactionConfig: this.eventsCompactionConfig,
           });
 
           // =========================================================================
@@ -288,6 +294,25 @@ export class Runner {
               }
               // Step 4: Run the after_run callbacks to optionally modify the context.
               await this.pluginManager.runAfterRunCallback({invocationContext});
+            }
+          }
+
+          // Step 5: Post-invocation sliding-window compaction.
+          if (this.eventsCompactionConfig) {
+            const llm = isLlmAgent(this.agent)
+              ? this.agent.canonicalModel
+              : undefined;
+            const compactionEvent = await runCompactionForSlidingWindow({
+              config: this.eventsCompactionConfig,
+              session,
+              sessionService: this.sessionService,
+              llm,
+              skipTokenCompaction: invocationContext.tokenCompactionChecked,
+              agentName: this.agent.name,
+              currentBranch: invocationContext.branch,
+            });
+            if (compactionEvent) {
+              yield compactionEvent;
             }
           }
         },

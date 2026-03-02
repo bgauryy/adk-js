@@ -30,6 +30,7 @@ const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
 export const REQUEST_EUC_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
+export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {

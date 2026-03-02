@@ -13,11 +13,14 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {BaseEventsSummarizer} from './agents/base_events_summarizer.js';
 export {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './agents/base_llm_processor.js';
 export {CallbackContext} from './agents/callback_context.js';
+export {validateEventsCompactionConfig} from './agents/events_compaction_config.js';
+export type {EventsCompactionConfig} from './agents/events_compaction_config.js';
 export {functionsExportedForTestingOnly} from './agents/functions.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {InvocationContextParams} from './agents/invocation_context.js';
@@ -38,6 +41,7 @@ export type {
   SingleBeforeToolCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
+export {LlmEventSummarizer} from './agents/llm_event_summarizer.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
@@ -85,7 +89,7 @@ export {
 } from './events/event.js';
 export type {Event} from './events/event.js';
 export {createEventActions} from './events/event_actions.js';
-export type {EventActions} from './events/event_actions.js';
+export type {EventActions, EventCompaction} from './events/event_actions.js';
 export {EventType, toStructuredEvents} from './events/structured_events.js';
 export type {
   ActivityEvent,

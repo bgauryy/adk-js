@@ -72,6 +72,10 @@ import {
 } from './base_llm_processor.js';
 import {CallbackContext} from './callback_context.js';
 import {
+  hasTokenThresholdConfig,
+  runCompactionForTokenThreshold,
+} from './compaction.js';
+import {
   getContents,
   getCurrentTurnContents,
 } from './content_processor_utils.js';
@@ -447,6 +451,41 @@ class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
 }
 const INSTRUCTIONS_LLM_REQUEST_PROCESSOR =
   new InstructionsLlmRequestProcessor();
+
+class CompactionRequestProcessor extends BaseLlmRequestProcessor {
+  // eslint-disable-next-line require-yield
+  override async *runAsync(
+    invocationContext: InvocationContext,
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    const config = invocationContext.eventsCompactionConfig;
+    if (!hasTokenThresholdConfig(config)) {
+      return;
+    }
+
+    if (!invocationContext.sessionService) {
+      return;
+    }
+
+    const agent = invocationContext.agent;
+    const llm = isLlmAgent(agent) ? agent.canonicalModel : undefined;
+    const compactionEvent = await runCompactionForTokenThreshold({
+      config: config!,
+      session: invocationContext.session,
+      sessionService: invocationContext.sessionService,
+      llm,
+      agentName: agent.name,
+      invocationId: invocationContext.invocationId,
+      currentBranch: invocationContext.branch,
+    });
+
+    if (compactionEvent) {
+      invocationContext.tokenCompactionChecked = true;
+      logger.debug('Token-threshold compaction applied.');
+    }
+  }
+}
+const COMPACTION_REQUEST_PROCESSOR = new CompactionRequestProcessor();
 
 class ContentRequestProcessor implements BaseLlmRequestProcessor {
   // eslint-disable-next-line require-yield
@@ -1363,6 +1402,7 @@ export class LlmAgent extends BaseAgent {
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
+      COMPACTION_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
     ];

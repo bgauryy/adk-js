@@ -16,6 +16,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {EventsCompactionConfig} from './events_compaction_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -39,6 +40,7 @@ export interface InvocationContextParams {
   liveRequestQueue?: LiveRequestQueue;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
+  eventsCompactionConfig?: EventsCompactionConfig;
 }
 
 /**
@@ -186,6 +188,16 @@ export class InvocationContext {
   pluginManager: PluginManager;
 
   /**
+   * Configuration for event compaction (token-threshold and/or sliding window).
+   */
+  eventsCompactionConfig?: EventsCompactionConfig;
+
+  /**
+   * Set to true after token-threshold compaction has been applied this step.
+   */
+  tokenCompactionChecked?: boolean;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -203,6 +215,7 @@ export class InvocationContext {
     this.liveRequestQueue = params.liveRequestQueue;
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
+    this.eventsCompactionConfig = params.eventsCompactionConfig;
   }
 
   /**

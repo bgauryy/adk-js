@@ -3,7 +3,7 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Content} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {
@@ -13,11 +13,32 @@ import {
   getFunctionResponses,
 } from '../events/event.js';
 
+import {processCompactionEvents} from './compaction.js';
 import {
   removeClientFunctionCallId,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_EUC_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from './functions.js';
+
+const ADK_FUNCTION_NAME_PREFIX = 'adk_';
+
+function hasVisibleContent(part: Part): boolean {
+  if (part.functionCall || part.functionResponse) return true;
+  if (part.thought) return false;
+  return !!(
+    part.text ||
+    part.inlineData ||
+    part.fileData ||
+    part.executableCode ||
+    part.codeExecutionResult
+  );
+}
+
+export function isEventContentEmpty(event: Event): boolean {
+  if (!event.content?.role || !event.content.parts?.length) return true;
+  return !event.content.parts.some(hasVisibleContent);
+}
 
 /**
  * Get the contents for the LLM request.
@@ -33,17 +54,23 @@ export function getContents(
   agentName: string,
   currentBranch?: string,
 ): Content[] {
-  const filteredEvents: Event[] = [];
+  // Phase 0 — rewind: honour the latest rewindBeforeInvocationId action.
+  const rewound = applyRewind(events);
 
-  for (const event of events) {
-    // Skip events without content, or generated neither by user nor by model.
-    // E.g. events purely for mutating session states.
-    if (!event.content?.role || event.content.parts?.[0]?.text === '') {
+  // Phase 1 — pre-filter.  Compaction events always pass through so
+  // processCompactionEvents can see the compaction metadata.
+  const preFiltered: Event[] = [];
+  for (const event of rewound) {
+    if (event.actions?.compaction) {
+      preFiltered.push(event);
       continue;
     }
 
-    // Skip events not in the current branch.
-    // TODO - b/425992518: inefficient, a tire search is better.
+    if (isEventContentEmpty(event)) {
+      continue;
+    }
+
+    // TODO - b/425992518: inefficient, a trie search is better.
     if (
       currentBranch &&
       event.branch &&
@@ -52,19 +79,32 @@ export function getContents(
       continue;
     }
 
-    if (isAuthEvent(event)) {
+    if (isAdkFrameworkEvent(event)) continue;
+    if (isAuthEvent(event)) continue;
+    if (isToolConfirmationEvent(event)) continue;
+    if (isRequestInputEvent(event)) continue;
+
+    preFiltered.push(event);
+  }
+
+  // Phase 2 — apply compaction (replaces raw events with summaries).
+  const hasCompaction = preFiltered.some((e) => e.actions?.compaction);
+  const sourceEvents = hasCompaction
+    ? processCompactionEvents(preFiltered)
+    : preFiltered;
+
+  // Phase 3 — post-process: foreign-event conversion, drop residual
+  // compaction-only events that carry no displayable content.
+  const filteredEvents: Event[] = [];
+  for (const event of sourceEvents) {
+    if (event.actions?.compaction && !event.content?.role) {
       continue;
     }
 
-    if (isToolConfirmationEvent(event)) {
-      continue;
-    }
+    const isForeign =
+      isEventFromAnotherAgent(agentName, event) && !event.actions?.compaction;
 
-    filteredEvents.push(
-      isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
-        : event,
-    );
+    filteredEvents.push(isForeign ? convertForeignEvent(event) : event);
   }
 
   let resultEvents = rearrangeEventsForLatestFunctionResponse(filteredEvents);
@@ -111,6 +151,53 @@ export function getCurrentTurnContents(
   }
 
   return [];
+}
+
+/**
+ * Whether ALL parts of the event are ADK framework function calls/responses
+ * (function names prefixed with `adk_`).
+ */
+export function isAdkFrameworkEvent(event: Event): boolean {
+  if (!event.content?.parts?.length) return false;
+  return event.content.parts.every((part) => {
+    const name = part.functionCall?.name ?? part.functionResponse?.name;
+    return !!name && name.startsWith(ADK_FUNCTION_NAME_PREFIX);
+  });
+}
+
+/**
+ * Whether the event is a request-input event.
+ */
+function isRequestInputEvent(event: Event): boolean {
+  if (!event.content?.parts) return false;
+  for (const part of event.content.parts) {
+    if (
+      part.functionCall?.name === REQUEST_INPUT_FUNCTION_CALL_NAME ||
+      part.functionResponse?.name === REQUEST_INPUT_FUNCTION_CALL_NAME
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyRewind(events: Event[]): Event[] {
+  let rewindInvocationId: string | undefined;
+  for (const event of events) {
+    if (event.actions?.rewindBeforeInvocationId) {
+      rewindInvocationId = event.actions.rewindBeforeInvocationId;
+    }
+  }
+  if (!rewindInvocationId) return events;
+
+  let rewindIdx: number | undefined;
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].invocationId === rewindInvocationId) {
+      rewindIdx = i;
+      break;
+    }
+  }
+  return rewindIdx != null ? events.slice(0, rewindIdx) : events;
 }
 
 /**

@@ -4,11 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content} from '@google/genai';
+
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
 // TODO: b/425992518 - Replace 'any' with a proper AuthConfig.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AuthConfig = any;
+
+/**
+ * Represents a compaction of session events into a summary.
+ */
+export interface EventCompaction {
+  /** The start timestamp of the compacted events range, in milliseconds. */
+  startTimestamp: number;
+
+  /** The end timestamp of the compacted events range, in milliseconds. */
+  endTimestamp: number;
+
+  /** The LLM-generated summary content replacing the compacted events. */
+  compactedContent: Content;
+}
 
 /**
  * Represents the actions attached to an event.
@@ -59,6 +75,19 @@ export interface EventActions {
    * call id.
    */
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
+
+  /**
+   * If set, this event represents a compaction of older events into a summary.
+   * The compacted content replaces raw events within the specified timestamp
+   * range when building contents for the LLM.
+   */
+  compaction?: EventCompaction;
+
+  /**
+   * If set, events from the specified invocation ID onward are removed from
+   * the LLM context, allowing agents to "undo" conversation branches.
+   */
+  rewindBeforeInvocationId?: string;
 }
 
 /**
@@ -122,6 +151,12 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.compaction !== undefined) {
+      result.compaction = source.compaction;
+    }
+    if (source.rewindBeforeInvocationId !== undefined) {
+      result.rewindBeforeInvocationId = source.rewindBeforeInvocationId;
     }
   }
   return result;
